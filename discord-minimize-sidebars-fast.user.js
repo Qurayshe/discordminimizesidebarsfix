@@ -53,6 +53,13 @@
         tWork: true,
         tOpa: '0',
         tVisHeight: '5px',
+        tInboxOnly: false,
+
+        // Clutter & UI cleanup
+        hideServerBanners: true,
+        hideGiftButton: true,
+        adsFiltering: '0',
+        noStatusWarning: false,
     };
 
     function loadConfig() {
@@ -259,9 +266,47 @@
             `);
         }
 
-        // Top Bar: Static grid height on .dms-base (inherits naturally, NO & * bomb)
-        // + GPU-translated overlay .dms-bar (NO grid-template-rows animation, NO :has())
-        if (cfg.tWork) {
+        // Top Bar: Inbox-only mode (collapses header, keeps only Inbox floating)
+        // OR hover-to-reveal mode (static grid height + GPU-translated overlay)
+        if (cfg.tInboxOnly) {
+            parts.push(`
+                .dms-base {
+                    --custom-app-top-bar-height: 0px;
+                }
+
+                .dms-bar > *:not([class^="trailing_"]) {
+                    visibility: hidden;
+                }
+
+                .dms-bar [class^="trailing_"] > div:not([class^="iconWrapper_"]):not(:last-of-type),
+                .dms-bar [class^="trailing_"] > a {
+                    display: none;
+                }
+
+                .dms-bar [class^="trailing_"] {
+                    height: 0;
+                    top: 24px;
+                    z-index: 500;
+                }
+
+                div[class^="upperContainer_"] {
+                    margin-right: 37px;
+                }
+
+                div[class*="threadSidebarOpen_"] div[class^="upperContainer_"] {
+                    margin-right: initial !important;
+                }
+
+                [class^="guildSidebar_"],
+                .dms-bar + div[class^="notice_"] {
+                    z-index: 600;
+                }
+
+                .dms-guilds {
+                    margin-top: 10px;
+                }
+            `);
+        } else if (cfg.tWork) {
             parts.push(`
                 .dms-base {
                     --custom-app-top-bar-height: var(--dms-t-vis-height);
@@ -288,6 +333,53 @@
                     transform: translateY(calc(-100% + var(--dms-t-vis-height)));
                     opacity: var(--dms-t-opa);
                     transition: transform var(--dms-duration) ease var(--dms-delay), opacity var(--dms-duration) ease var(--dms-delay);
+                }
+            `);
+        }
+
+        // Hide server banners
+        if (cfg.hideServerBanners) {
+            parts.push(`
+                div[class*="banner-"],
+                div[class*="bannerImage_"],
+                img[class*="bannerImage_"] {
+                    display: none !important;
+                }
+            `);
+        }
+
+        // Hide "Send a gift" button
+        if (cfg.hideGiftButton) {
+            parts.push(`
+                .button_74017.button_24af7,
+                [aria-label="Send a gift"] {
+                    display: none !important;
+                }
+            `);
+        }
+
+        // Textarea ads / Nitro / Apps filtering
+        const adsLevel = Number(cfg.adsFiltering) || 0;
+        if (adsLevel >= 1) {
+            parts.push(`
+                div[class^="textArea_"] + [class^="buttons_"] > div:not(.expression-picker-chat-input-button):first-child {
+                    display: none !important;
+                }
+            `);
+        }
+        if (adsLevel >= 2) {
+            parts.push(`
+                .app-launcher-entrypoint[class^="buttonContainer_"] {
+                    display: none !important;
+                }
+            `);
+        }
+
+        // Hide Invisible status warning icon
+        if (cfg.noStatusWarning) {
+            parts.push(`
+                .user-profile-popout div[class^="menus_"] div[class^="container_"] > svg {
+                    display: none !important;
                 }
             `);
         }
@@ -377,7 +469,7 @@
             }
         }
 
-        if (config.tWork) {
+        if (config.tWork || config.tInboxOnly) {
             const bar = tagElement('bar', 'dms-bar', () => {
                 // Prefer direct child bar_ of base
                 for (const child of base.children) {
@@ -458,9 +550,23 @@
             { key: 'uAbs', label: 'User Panel - Floating Ball', type: 'checkbox' },
             { key: 'uaWidth', label: 'User Panel - Floating Width', type: 'text' },
             { key: 'uaMinLeft', label: 'User Panel - Floating Offset', type: 'text' },
-            { key: 'tWork', label: 'Top Bar - Hide', type: 'checkbox' },
+            { key: 'tWork', label: 'Top Bar - Hide (Hover to reveal)', type: 'checkbox' },
+            { key: 'tInboxOnly', label: 'Top Bar - Hide Header (Inbox Only)', type: 'checkbox' },
             { key: 'tVisHeight', label: 'Top Bar - Visible Strip Height', type: 'text' },
             { key: 'tOpa', label: 'Top Bar - Minimized Opacity', type: 'text' },
+            { key: 'hideServerBanners', label: 'Hide Server Banners', type: 'checkbox' },
+            { key: 'hideGiftButton', label: 'Hide "Send a gift" Button', type: 'checkbox' },
+            {
+                key: 'adsFiltering',
+                label: 'Hide in Textarea',
+                type: 'select',
+                options: [
+                    { value: '0', label: 'None' },
+                    { value: '1', label: 'Nitro button' },
+                    { value: '2', label: 'Nitro + Apps buttons' },
+                ],
+            },
+            { key: 'noStatusWarning', label: 'Hide Invisible Status Warning Icon', type: 'checkbox' },
         ];
 
         const title = document.createElement('h3');
@@ -477,13 +583,26 @@
             span.textContent = f.label;
             row.appendChild(span);
 
-            const input = document.createElement('input');
-            input.type = f.type;
-            if (f.type === 'checkbox') {
-                input.checked = Boolean(config[f.key]);
+            let input;
+            if (f.type === 'select') {
+                input = document.createElement('select');
+                input.style.cssText = 'background:#1e1f22;color:#f2f3f5;border:1px solid #3f4147;border-radius:4px;padding:4px 8px;width:140px;';
+                for (const opt of f.options) {
+                    const o = document.createElement('option');
+                    o.value = opt.value;
+                    o.textContent = opt.label;
+                    input.appendChild(o);
+                }
+                input.value = String(config[f.key] ?? f.options[0].value);
             } else {
-                input.value = String(config[f.key] ?? '');
-                input.style.cssText = 'background:#1e1f22;color:#f2f3f5;border:1px solid #3f4147;border-radius:4px;padding:4px 8px;width:110px;';
+                input = document.createElement('input');
+                input.type = f.type;
+                if (f.type === 'checkbox') {
+                    input.checked = Boolean(config[f.key]);
+                } else {
+                    input.value = String(config[f.key] ?? '');
+                    input.style.cssText = 'background:#1e1f22;color:#f2f3f5;border:1px solid #3f4147;border-radius:4px;padding:4px 8px;width:110px;';
+                }
             }
             inputs[f.key] = { input, type: f.type };
             row.appendChild(input);
